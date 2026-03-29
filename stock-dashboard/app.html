@@ -174,7 +174,7 @@ tr:hover td{background:rgba(88,166,255,.04)}
   <div class="section-body open" id="body-twdUs">
     <div class="table-wrap">
       <table id="table-twdUs"><thead><tr>
-        <th>代號</th><th>名稱</th><th>股數</th><th>成本/股(TWD)</th><th>現價(USD) ≈TWD</th><th>市值(TWD)</th><th>損益(TWD)</th><th>損益%</th><th></th>
+        <th>代號</th><th>名稱</th><th>股數</th><th>成本/股(USD)</th><th>現價(USD)</th><th>市值(USD)</th><th>市值(TWD)</th><th>損益(USD)</th><th>損益%</th><th></th>
       </tr></thead><tbody id="tbody-twdUs"></tbody></table>
     </div>
     <div class="section-add">
@@ -298,54 +298,43 @@ async function loadState() {
 }
 
 // ─── Price fetching ─────────────────────────────────────────────────
+// ─── Taiwan stock unified cache ──────────────────────────────────────
+let twDataCache = null;
+async function loadTWData() {
+  if (twDataCache) return twDataCache;
+  twDataCache = {};
+  const [r1, r2] = await Promise.allSettled([
+    fetch('https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL', { signal: AbortSignal.timeout(10000) }).then(r => r.json()),
+    fetch('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes', { signal: AbortSignal.timeout(10000) }).then(r => r.json())
+  ]);
+  if (r1.status === 'fulfilled' && Array.isArray(r1.value)) {
+    r1.value.forEach(item => {
+      const sym = item['證券代號'];
+      if (!sym) return;
+      const p = parseFloat((item['收盤價'] || '').replace(/,/g, ''));
+      twDataCache[sym] = { name: item['證券名稱'] || '', price: (p && !isNaN(p)) ? p : null };
+    });
+  }
+  if (r2.status === 'fulfilled' && Array.isArray(r2.value)) {
+    r2.value.forEach(item => {
+      const sym = item['SecuritiesCompanyCode'];
+      if (!sym) return;
+      const p = parseFloat((item['Close'] || '').replace(/,/g, ''));
+      twDataCache[sym] = { name: item['CompanyAbbreviation'] || '', price: (p && !isNaN(p)) ? p : null };
+    });
+  }
+  return twDataCache;
+}
+
 async function fetchTWPrices(symbols) {
   if (!symbols.length) return;
-
-  // Step 1: Try real-time MIS API (works during market hours 9:00–13:30)
-  try {
-    const ts = Date.now();
-    const parts = symbols.map(s => `tse_${s}.tw|otc_${s}.tw`).join('|');
-    const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${parts}&json=1&delay=0&_=${ts}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    const data = await res.json();
-    if (data.msgArray) {
-      data.msgArray.forEach(item => {
-        if (!item.c) return;
-        const sym = item.c;
-        const p = (item.z && item.z !== '-') ? parseFloat(item.z)
-                : (item.pz && item.pz !== '-') ? parseFloat(item.pz)
-                : null;
-        if (p && !isNaN(p)) prices[sym] = p;
-        if (item.n) state.portfolios.tw.forEach(h => { if (h.symbol === sym && !h.name) h.name = item.n; });
-      });
-    }
-  } catch(e) { /* will fallback below */ }
-
-  // Step 2: For any symbol still missing a price, fallback to TWSE/TPEX open API (closing price)
-  const missing = symbols.filter(s => !prices[s]);
-  if (!missing.length) return;
-  await Promise.allSettled(missing.map(async sym => {
-    // Try TWSE open API
-    try {
-      const r = await fetch(`https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY?stockNo=${sym}`, { signal: AbortSignal.timeout(6000) });
-      const d = await r.json();
-      if (Array.isArray(d) && d.length) {
-        const last = d[d.length - 1];
-        const p = parseFloat((last.ClosingPrice || '').replace(/,/g, ''));
-        if (p && !isNaN(p)) { prices[sym] = p; return; }
-      }
-    } catch {}
-    // Try TPEX open API
-    try {
-      const r2 = await fetch(`https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis?stockNo=${sym}`, { signal: AbortSignal.timeout(6000) });
-      const d2 = await r2.json();
-      if (Array.isArray(d2) && d2.length) {
-        const item = d2[0];
-        const p = parseFloat((item.ClosingPrice || item.Close || '').replace(/,/g, ''));
-        if (p && !isNaN(p)) prices[sym] = p;
-      }
-    } catch {}
-  }));
+  const cache = await loadTWData();
+  symbols.forEach(sym => {
+    const d = cache[sym];
+    if (!d) return;
+    if (d.price) prices[sym] = d.price;
+    if (d.name) state.portfolios.tw.forEach(h => { if (h.symbol === sym && !h.name) h.name = d.name; });
+  });
 }
 
 async function fetchUSPrices(symbols) {
@@ -383,49 +372,22 @@ async function doRefresh() {
   refreshTimer = setInterval(fetchAllPrices, REFRESH_INTERVAL);
 }
 
-// ─── Taiwan stock lookup ─────────────────────────────────────────────
+// ─── Taiwan stock lookup & search (uses unified cache) ───────────────
 async function lookupTWStock(code) {
-  const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_${code}.tw|otc_${code}.tw&json=1&delay=0`;
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
-    const data = await res.json();
-    if (data.msgArray && data.msgArray.length) {
-      const item = data.msgArray[0];
-      return { symbol: item.c, name: item.n, market: item.ex };
-    }
-  } catch(e) {}
+  const cache = await loadTWData();
+  const d = cache[code];
+  if (d) return { symbol: code, name: d.name };
   return null;
-}
-
-// Taiwan stock search (by code prefix or name)
-let twStockList = null;
-async function getTWStockList() {
-  if (twStockList) return twStockList;
-  try {
-    // TWSE listed
-    const [r1, r2] = await Promise.allSettled([
-      fetch('https://openapi.twse.com.tw/v1/opendata/t187ap03_L').then(r=>r.json()),
-      fetch('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_listed_companies').then(r=>r.json())
-    ]);
-    twStockList = [];
-    if (r1.status==='fulfilled' && Array.isArray(r1.value)) {
-      r1.value.forEach(s => twStockList.push({ symbol: s['公司代號']||s.Code, name: s['公司簡稱']||s['公司名稱']||s.Name||'' }));
-    }
-    if (r2.status==='fulfilled' && Array.isArray(r2.value)) {
-      r2.value.forEach(s => twStockList.push({ symbol: s['SecuritiesCompanyCode']||s['代號']||s.Code, name: s['CompanyName']||s['公司名稱']||s.Name||'' }));
-    }
-  } catch(e) { twStockList = []; }
-  return twStockList;
 }
 
 async function searchTWStocks(q) {
   if (!q || q.length < 1) return [];
-  const list = await getTWStockList();
+  const cache = await loadTWData();
   const ql = q.toLowerCase();
-  return list.filter(s =>
-    s.symbol && s.name &&
-    (s.symbol.startsWith(q) || s.name.includes(q) || s.symbol.toLowerCase().includes(ql))
-  ).slice(0, 10);
+  return Object.entries(cache)
+    .filter(([sym, d]) => sym.startsWith(q) || d.name.includes(q) || sym.toLowerCase().includes(ql))
+    .slice(0, 10)
+    .map(([symbol, d]) => ({ symbol, name: d.name }));
 }
 
 // ─── US stock search (Finnhub) ───────────────────────────────────────
@@ -470,11 +432,12 @@ function calcTW(h) {
 }
 function calcTWDUS(h, rate) {
   const price = prices[h.symbol]; // USD
-  const valueTWD = price != null ? price * rate * h.shares : null;
-  const costTWD = h.cost * h.shares; // cost already in TWD
-  const pnl = valueTWD != null ? valueTWD - costTWD : null;
-  const pct = pnl != null ? (pnl / costTWD) * 100 : null;
-  return { price, valueTWD, costTWD, pnl, pct };
+  const costUSD = h.cost * h.shares; // cost in USD
+  const valueUSD = price != null ? price * h.shares : null;
+  const valueTWD = valueUSD != null ? valueUSD * rate : null;
+  const pnlUSD = valueUSD != null ? valueUSD - costUSD : null;
+  const pct = pnlUSD != null ? (pnlUSD / costUSD) * 100 : null;
+  return { price, valueUSD, valueTWD, costUSD, pnlUSD, pct };
 }
 function calcUSDUS(h) {
   const price = prices[h.symbol]; // USD
@@ -521,10 +484,11 @@ function renderAll() {
   const twdUsBody = document.getElementById('tbody-twdUs');
   twdUsBody.innerHTML = '';
   if (!state.portfolios.twdUs.length) {
-    twdUsBody.innerHTML = '<tr><td colspan="9" class="empty-state">尚無持股，點擊新增</td></tr>';
+    twdUsBody.innerHTML = '<tr><td colspan="10" class="empty-state">尚無持股，點擊新增</td></tr>';
   } else {
     state.portfolios.twdUs.forEach((h, i) => {
-      const { price, valueTWD, costTWD, pnl, pct } = calcTWDUS(h, rate);
+      const { price, valueUSD, valueTWD, costUSD, pnlUSD, pct } = calcTWDUS(h, rate);
+      const costTWD = costUSD * rate;
       if (valueTWD != null) { usTotalValTWD += valueTWD; usTotalCostTWD += costTWD; }
       else { usTotalCostTWD += costTWD; }
       const tr = document.createElement('tr');
@@ -532,10 +496,11 @@ function renderAll() {
         <td><span class="symbol">${h.symbol}</span></td>
         <td><span class="name" title="${h.name||''}">${h.name||'—'}</span></td>
         <td>${fmtShares(h.shares, true)}</td>
-        <td>${fmtNum(h.cost, 2)}</td>
-        <td class="${price ? '' : 'price-loading'}">${price ? `$${fmtNum(price,2)}<br><small style="color:var(--dim)">≈${fmtNum(price*rate)}</small>` : '載入中'}</td>
+        <td>$${fmtNum(h.cost, 2)}</td>
+        <td class="${price ? '' : 'price-loading'}">${price ? '$'+fmtNum(price,2) : '載入中'}</td>
+        <td>${valueUSD != null ? '$'+fmtNum(valueUSD,2) : '—'}</td>
         <td>${valueTWD != null ? fmtNum(valueTWD) : '—'}</td>
-        <td class="${pnlClass(pnl)}">${pnl != null ? (pnl>=0?'+':'')+fmtNum(pnl) : '—'}</td>
+        <td class="${pnlClass(pnlUSD)}">${pnlUSD != null ? (pnlUSD>=0?'+$':'-$')+fmtNum(Math.abs(pnlUSD),2) : '—'}</td>
         <td class="${pnlClass(pct)}">${fmtPct(pct)}</td>
         <td><button class="btn-danger" onclick="removeHolding('twdUs',${i})">✕</button></td>`;
       twdUsBody.appendChild(tr);
@@ -609,7 +574,7 @@ function toggleSection(type) {
 // ─── Modal ──────────────────────────────────────────────────────────
 function buildRowHTML(idx, type) {
   const isTW = type === 'tw';
-  const costLabel = isTW ? '成本/股 (TWD)' : (type === 'twdUs' ? '成本/股 (TWD)' : '成本/股 (USD)');
+  const costLabel = isTW ? '成本/股 (TWD)' : '成本/股 (USD)';
   return `
 <div class="add-row" id="arow-${idx}">
   <div class="field">
