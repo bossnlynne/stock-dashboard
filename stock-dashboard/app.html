@@ -348,6 +348,18 @@ async function fetchUSPrices(symbols) {
   await Promise.allSettled(fetches);
 }
 
+async function fetchExchangeRate() {
+  try {
+    const res = await fetch('https://open.er-api.com/v6/latest/USD', { signal: AbortSignal.timeout(6000) });
+    const data = await res.json();
+    const rate = data?.rates?.TWD;
+    if (rate && !isNaN(rate)) {
+      state.exchangeRate = Math.round(rate * 100) / 100;
+      document.getElementById('rate-input').value = state.exchangeRate;
+    }
+  } catch(e) { /* keep existing rate */ }
+}
+
 async function fetchAllPrices() {
   const twSyms = [...new Set(state.portfolios.tw.map(h => h.symbol))];
   const usSyms = [...new Set([
@@ -355,7 +367,7 @@ async function fetchAllPrices() {
     ...state.portfolios.usdUs.map(h => h.symbol)
   ])];
   setRefreshSpin(true);
-  await Promise.allSettled([fetchTWPrices(twSyms), fetchUSPrices(usSyms)]);
+  await Promise.allSettled([fetchExchangeRate(), fetchTWPrices(twSyms), fetchUSPrices(usSyms)]);
   lastUpdated = new Date();
   setRefreshSpin(false);
   renderAll();
