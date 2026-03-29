@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;
+  --text:#e6edf3;--dim:#8b949e;--profit:#f85149;--loss:#3fb950;
+  --accent:#58a6ff;--warn:#d29922;--del:#f85149;
+}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;min-height:100vh}
+a{color:var(--accent)}
+input,select{background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 10px;font-size:13px;outline:none}
+input:focus,select:focus{border-color:var(--accent)}
+button{cursor:pointer;border:none;border-radius:6px;font-size:13px;padding:6px 14px;transition:.15s}
+.btn-primary{background:var(--accent);color:#0d1117;font-weight:600}
+.btn-primary:hover{background:#79c0ff}
+.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
+.btn-ghost:hover{background:var(--surface2)}
+.btn-danger{background:transparent;border:none;color:var(--del);padding:2px 6px;font-size:12px}
+.btn-danger:hover{color:#ff7b72}
+.btn-icon{background:transparent;border:none;color:var(--dim);padding:4px 8px;font-size:16px}
+.btn-icon:hover{color:var(--text)}
+
+/* Header */
+#header{position:sticky;top:0;z-index:100;background:var(--bg);border-bottom:1px solid var(--border);padding:12px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+#header h1{font-size:18px;font-weight:700;color:var(--text);flex:1;min-width:160px}
+.rate-control{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--dim)}
+.rate-control label{white-space:nowrap}
+.rate-control input{width:80px}
+#refresh-btn{display:flex;align-items:center;gap:6px}
+#last-update{font-size:11px;color:var(--dim)}
+.spinning{animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Summary cards */
+#summary{display:flex;gap:12px;padding:16px 20px;flex-wrap:wrap}
+.summary-card{flex:1;min-width:160px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 18px}
+.summary-card .label{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.summary-card .value{font-size:20px;font-weight:700}
+.summary-card .sub{font-size:11px;color:var(--dim);margin-top:3px}
+
+/* Portfolio sections */
+.portfolio-section{margin:0 20px 20px;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.section-header{background:var(--surface);padding:12px 16px;display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
+.section-header .icon{font-size:16px}
+.section-header .title{flex:1;font-weight:600;font-size:14px}
+.section-header .sect-summary{font-size:12px;color:var(--dim);margin-right:8px}
+.section-header .toggle{color:var(--dim);transition:.2s}
+.section-body{display:none}
+.section-body.open{display:block}
+
+/* Table */
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:var(--surface2);color:var(--dim);font-weight:500;text-align:right;padding:8px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+th:first-child,th:nth-child(2){text-align:left}
+td{padding:8px 12px;border-bottom:1px solid var(--border);text-align:right;vertical-align:middle;white-space:nowrap}
+td:first-child,td:nth-child(2){text-align:left}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(88,166,255,.04)}
+.symbol{font-weight:600;color:var(--accent)}
+.name{color:var(--dim);font-size:12px;max-width:120px;overflow:hidden;text-overflow:ellipsis}
+.profit{color:var(--profit)}
+.loss{color:var(--loss)}
+.neutral{color:var(--dim)}
+.price-loading{color:var(--dim);font-style:italic}
+.section-add{padding:10px 16px;background:var(--surface)}
+
+/* Modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;width:100%;max-width:680px;max-height:90vh;overflow-y:auto}
+.modal-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.modal-header h3{font-size:16px;font-weight:600}
+.modal-body{padding:20px}
+.modal-footer{padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end}
+.add-rows{display:flex;flex-direction:column;gap:8px}
+.add-row{display:grid;grid-template-columns:1fr 1.5fr 1fr 1fr auto;gap:8px;align-items:start}
+.add-row .field{display:flex;flex-direction:column;gap:3px}
+.add-row .field label{font-size:11px;color:var(--dim)}
+.add-row .field input{width:100%}
+.search-wrap{position:relative}
+.search-dropdown{position:absolute;top:100%;left:0;right:0;z-index:300;background:var(--surface);border:1px solid var(--border);border-radius:6px;max-height:200px;overflow-y:auto;margin-top:2px}
+.search-item{padding:8px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border)}
+.search-item:last-child{border-bottom:none}
+.search-item:hover{background:var(--surface2)}
+.search-item .si-symbol{font-weight:600;color:var(--accent)}
+.search-item .si-name{color:var(--dim);margin-left:6px}
+.add-more-btn{margin-top:6px;color:var(--accent);background:none;border:1px dashed var(--border);width:100%;padding:8px;border-radius:6px}
+.add-more-btn:hover{border-color:var(--accent)}
+
+/* Toast */
+.toast{position:fixed;bottom:24px;right:24px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 16px;z-index:999;font-size:13px;animation:fadeIn .2s}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}}
+
+/* Empty state */
+.empty-state{padding:32px;text-align:center;color:var(--dim)}
+
+/* Responsive */
+@media(max-width:600px){
+  #header{padding:10px 12px}
+  #summary{padding:12px}
+  .portfolio-section{margin:0 12px 16px}
+  th,td{padding:6px 8px}
+  .add-row{grid-template-columns:1fr 1fr;gap:6px}
+}
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>📊 Stock Dashboard</h1>
+  <div class="rate-control">
+    <label>USD/TWD</label>
+    <input type="number" id="rate-input" value="32.5" step="0.1" min="1" style="width:82px">
+  </div>
+  <button class="btn-ghost" id="refresh-btn" onclick="doRefresh()">
+    <span id="refresh-icon">⟳</span> 更新報價
+  </button>
+  <div id="last-update"></div>
+</div>
+
+<div id="summary">
+  <div class="summary-card">
+    <div class="label">台股市值</div>
+    <div class="value" id="s-tw-val">—</div>
+  </div>
+  <div class="summary-card">
+    <div class="label">美股市值 (TWD)</div>
+    <div class="value" id="s-us-val">—</div>
+  </div>
+  <div class="summary-card">
+    <div class="label">總市值</div>
+    <div class="value" id="s-total-val">—</div>
+  </div>
+  <div class="summary-card">
+    <div class="label">總損益 (TWD)</div>
+    <div class="value" id="s-pnl">—</div>
+    <div class="sub" id="s-pnl-pct"></div>
+  </div>
+</div>
+
+<!-- 台股 -->
+<div class="portfolio-section" id="sec-tw">
+  <div class="section-header" onclick="toggleSection('tw')">
+    <span class="icon">🇹🇼</span>
+    <span class="title">台股</span>
+    <span class="sect-summary" id="sect-sum-tw"></span>
+    <span class="toggle" id="toggle-tw">▼</span>
+  </div>
+  <div class="section-body open" id="body-tw">
+    <div class="table-wrap">
+      <table id="table-tw"><thead><tr>
+        <th>代號</th><th>名稱</th><th>股數</th><th>成本/股(TWD)</th><th>現價(TWD)</th><th>市值(TWD)</th><th>損益(TWD)</th><th>損益%</th><th></th>
+      </tr></thead><tbody id="tbody-tw"></tbody></table>
+    </div>
+    <div class="section-add">
+      <button class="btn-primary" onclick="openModal('tw')">＋ 新增台股</button>
+    </div>
+  </div>
+</div>
+
+<!-- 台幣複委託美股 -->
+<div class="portfolio-section" id="sec-twdUs">
+  <div class="section-header" onclick="toggleSection('twdUs')">
+    <span class="icon">🌐</span>
+    <span class="title">台幣複委託美股</span>
+    <span class="sect-summary" id="sect-sum-twdUs"></span>
+    <span class="toggle" id="toggle-twdUs">▼</span>
+  </div>
+  <div class="section-body open" id="body-twdUs">
+    <div class="table-wrap">
+      <table id="table-twdUs"><thead><tr>
+        <th>代號</th><th>名稱</th><th>股數</th><th>成本/股(TWD)</th><th>現價(USD) ≈TWD</th><th>市值(TWD)</th><th>損益(TWD)</th><th>損益%</th><th></th>
+      </tr></thead><tbody id="tbody-twdUs"></tbody></table>
+    </div>
+    <div class="section-add">
+      <button class="btn-primary" onclick="openModal('twdUs')">＋ 新增台幣複委託美股</button>
+    </div>
+  </div>
+</div>
+
+<!-- 外幣複委託美股 -->
+<div class="portfolio-section" id="sec-usdUs">
+  <div class="section-header" onclick="toggleSection('usdUs')">
+    <span class="icon">💵</span>
+    <span class="title">外幣複委託美股 (USD)</span>
+    <span class="sect-summary" id="sect-sum-usdUs"></span>
+    <span class="toggle" id="toggle-usdUs">▼</span>
+  </div>
+  <div class="section-body open" id="body-usdUs">
+    <div class="table-wrap">
+      <table id="table-usdUs"><thead><tr>
+        <th>代號</th><th>名稱</th><th>股數</th><th>成本/股(USD)</th><th>現價(USD)</th><th>市值(USD)</th><th>損益(USD)</th><th>損益%</th><th></th>
+      </tr></thead><tbody id="tbody-usdUs"></tbody></table>
+    </div>
+    <div class="section-add">
+      <button class="btn-primary" onclick="openModal('usdUs')">＋ 新增外幣複委託美股</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Modal -->
+<div class="modal-overlay" id="modal" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modal-title">新增持股</h3>
+      <button class="btn-icon" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="add-rows" id="add-rows"></div>
+      <button class="add-more-btn" onclick="addRowToModal()">＋ 再加一筆</button>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" onclick="closeModal()">取消</button>
+      <button class="btn-primary" onclick="submitModal()">確認新增</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+// ─── Config ────────────────────────────────────────────────────────
+const FINNHUB_KEY = 'd73o7hhr01qjjol3nfb0d73o7hhr01qjjol3nfbg';
+const LS_KEY = 'sdb_v2';
+const REFRESH_INTERVAL = 60000;
+
+// ─── State ─────────────────────────────────────────────────────────
+let state = {"exchangeRate":32.5,"portfolios":{"tw":[{"id":1774713106405.1533,"symbol":"2330","name":"","shares":228,"cost":1884.48},{"id":1774713106405.9204,"symbol":"0050","name":"","shares":542,"cost":54.2},{"id":1774713106405.0706,"symbol":"2317","name":"","shares":686,"cost":201.42},{"id":1774713106405.263,"symbol":"2886","name":"","shares":1000,"cost":38.02},{"id":1774713106405.5823,"symbol":"3324","name":"","shares":600,"cost":1113.33}],"twdUs":[{"id":1774713431044.8723,"symbol":"AAPL","name":"APPLE INC","shares":12.5818,"cost":217.891717},{"id":1774713431044.6646,"symbol":"CEG","name":"CONSTELLATION ENERGY","shares":20,"cost":306.1515},{"id":1774713431044.04,"symbol":"COST","name":"COSTCO WHOLESALE CORP","shares":0.63652,"cost":786.306793},{"id":1774713431044.945,"symbol":"NVDA","name":"NVIDIA CORP","shares":23.82795,"cost":181.022287},{"id":1774713431044.8176,"symbol":"VOO","name":"VANGUARD S&P 500 ETF","shares":5.77368,"cost":547.600491}],"usdUs":[{"id":1774713283829.538,"symbol":"MSFT","name":"MICROSOFT CORP","shares":4.17784,"cost":370.105126},{"id":1774713283829.2327,"symbol":"MU","name":"MICRON TECHNOLOGY INC","shares":0.27383,"cost":365.482234},{"id":1774713283829.5447,"symbol":"NVDA","name":"NVIDIA CORP","shares":0.59259,"cost":168.885739},{"id":1774713283829.1846,"symbol":"VRT","name":"VERTIV HOLDINGS CO-A","shares":2.86951,"cost":261.229269},{"id":1774713283829.2974,"symbol":"XLV","name":"SS HEALTH CARE SELECT SECTOR","shares":1.38059,"cost":147.038585}]}};
+let prices = {};
+let lastUpdated = null;
+let refreshTimer = null;
+let currentModalType = null;
+let _cryptoKey = null;
+
+// ─── Crypto helpers (localStorage encryption) ──────────────────────
+const LS_SALT = 'sdb_salt_2024';
+async function getCryptoKey(password) {
+  if (_cryptoKey) return _cryptoKey;
+  const enc = new TextEncoder();
+  const km = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
+  _cryptoKey = await crypto.subtle.deriveKey(
+    { name:'PBKDF2', salt:enc.encode(LS_SALT), iterations:100000, hash:'SHA-256' },
+    km, { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']
+  );
+  return _cryptoKey;
+}
+async function encryptData(obj, password) {
+  const key = await getCryptoKey(password);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const enc = new TextEncoder();
+  const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, key, enc.encode(JSON.stringify(obj)));
+  const out = new Uint8Array(iv.length + ct.byteLength);
+  out.set(iv); out.set(new Uint8Array(ct), iv.length);
+  return btoa(String.fromCharCode(...out));
+}
+async function decryptData(b64, password) {
+  const key = await getCryptoKey(password);
+  const raw = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  const iv = raw.slice(0, 12);
+  const ct = raw.slice(12);
+  const pt = await crypto.subtle.decrypt({ name:'AES-GCM', iv }, key, ct);
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+// ─── Persistence ───────────────────────────────────────────────────
+let _pwd = null;
+async function saveState() {
+  try {
+    if (_pwd) {
+      const enc = await encryptData(state, _pwd);
+      localStorage.setItem(LS_KEY, enc);
+    } else {
+      localStorage.setItem(LS_KEY, JSON.stringify(state));
+    }
+  } catch(e) { console.error('save err', e); }
+}
+async function loadState() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return;
+    let loaded;
+    if (_pwd) {
+      try { loaded = await decryptData(raw, _pwd); }
+      catch { loaded = JSON.parse(raw); }
+    } else { loaded = JSON.parse(raw); }
+    if (loaded && loaded.portfolios) {
+      state = Object.assign({}, state, loaded);
+      // Ensure all portfolio types exist
+      state.portfolios.tw = state.portfolios.tw || [];
+      state.portfolios.twdUs = state.portfolios.twdUs || [];
+      state.portfolios.usdUs = state.portfolios.usdUs || [];
+    }
+  } catch(e) { console.error('load err', e); }
+}
+
+// ─── Price fetching ─────────────────────────────────────────────────
+async function fetchTWPrices(symbols) {
+  if (!symbols.length) return;
+
+  // Step 1: Try real-time MIS API (works during market hours 9:00–13:30)
+  try {
+    const ts = Date.now();
+    const parts = symbols.map(s => `tse_${s}.tw|otc_${s}.tw`).join('|');
+    const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${parts}&json=1&delay=0&_=${ts}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    const data = await res.json();
+    if (data.msgArray) {
+      data.msgArray.forEach(item => {
+        if (!item.c) return;
+        const sym = item.c;
+        const p = (item.z && item.z !== '-') ? parseFloat(item.z)
+                : (item.pz && item.pz !== '-') ? parseFloat(item.pz)
+                : null;
+        if (p && !isNaN(p)) prices[sym] = p;
+        if (item.n) state.portfolios.tw.forEach(h => { if (h.symbol === sym && !h.name) h.name = item.n; });
+      });
+    }
+  } catch(e) { /* will fallback below */ }
+
+  // Step 2: For any symbol still missing a price, fallback to TWSE/TPEX open API (closing price)
+  const missing = symbols.filter(s => !prices[s]);
+  if (!missing.length) return;
+  await Promise.allSettled(missing.map(async sym => {
+    // Try TWSE open API
+    try {
+      const r = await fetch(`https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY?stockNo=${sym}`, { signal: AbortSignal.timeout(6000) });
+      const d = await r.json();
+      if (Array.isArray(d) && d.length) {
+        const last = d[d.length - 1];
+        const p = parseFloat((last.ClosingPrice || '').replace(/,/g, ''));
+        if (p && !isNaN(p)) { prices[sym] = p; return; }
+      }
+    } catch {}
+    // Try TPEX open API
+    try {
+      const r2 = await fetch(`https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis?stockNo=${sym}`, { signal: AbortSignal.timeout(6000) });
+      const d2 = await r2.json();
+      if (Array.isArray(d2) && d2.length) {
+        const item = d2[0];
+        const p = parseFloat((item.ClosingPrice || item.Close || '').replace(/,/g, ''));
+        if (p && !isNaN(p)) prices[sym] = p;
+      }
+    } catch {}
+  }));
+}
+
+async function fetchUSPrices(symbols) {
+  if (!symbols.length) return;
+  const fetches = symbols.map(sym =>
+    fetch(`https://finnhub.io/api/v1/quote?symbol=${sym}&token=${FINNHUB_KEY}`, { signal: AbortSignal.timeout(8000) })
+      .then(r => r.json())
+      .then(d => { if (d.c) prices[sym] = d.c; })
+      .catch(() => {})
+  );
+  await Promise.allSettled(fetches);
+}
+
+async function fetchAllPrices() {
+  const twSyms = [...new Set(state.portfolios.tw.map(h => h.symbol))];
+  const usSyms = [...new Set([
+    ...state.portfolios.twdUs.map(h => h.symbol),
+    ...state.portfolios.usdUs.map(h => h.symbol)
+  ])];
+  setRefreshSpin(true);
+  await Promise.allSettled([fetchTWPrices(twSyms), fetchUSPrices(usSyms)]);
+  lastUpdated = new Date();
+  setRefreshSpin(false);
+  renderAll();
+}
+
+function setRefreshSpin(on) {
+  document.getElementById('refresh-icon').className = on ? 'spinning' : '';
+  document.getElementById('refresh-icon').textContent = '⟳';
+}
+
+async function doRefresh() {
+  clearInterval(refreshTimer);
+  await fetchAllPrices();
+  refreshTimer = setInterval(fetchAllPrices, REFRESH_INTERVAL);
+}
+
+// ─── Taiwan stock lookup ─────────────────────────────────────────────
+async function lookupTWStock(code) {
+  const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_${code}.tw|otc_${code}.tw&json=1&delay=0`;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    const data = await res.json();
+    if (data.msgArray && data.msgArray.length) {
+      const item = data.msgArray[0];
+      return { symbol: item.c, name: item.n, market: item.ex };
+    }
+  } catch(e) {}
+  return null;
+}
+
+// Taiwan stock search (by code prefix or name)
+let twStockList = null;
+async function getTWStockList() {
+  if (twStockList) return twStockList;
+  try {
+    // TWSE listed
+    const [r1, r2] = await Promise.allSettled([
+      fetch('https://openapi.twse.com.tw/v1/opendata/t187ap03_L').then(r=>r.json()),
+      fetch('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_listed_companies').then(r=>r.json())
+    ]);
+    twStockList = [];
+    if (r1.status==='fulfilled' && Array.isArray(r1.value)) {
+      r1.value.forEach(s => twStockList.push({ symbol: s['公司代號']||s.Code, name: s['公司簡稱']||s['公司名稱']||s.Name||'' }));
+    }
+    if (r2.status==='fulfilled' && Array.isArray(r2.value)) {
+      r2.value.forEach(s => twStockList.push({ symbol: s['SecuritiesCompanyCode']||s['代號']||s.Code, name: s['CompanyName']||s['公司名稱']||s.Name||'' }));
+    }
+  } catch(e) { twStockList = []; }
+  return twStockList;
+}
+
+async function searchTWStocks(q) {
+  if (!q || q.length < 1) return [];
+  const list = await getTWStockList();
+  const ql = q.toLowerCase();
+  return list.filter(s =>
+    s.symbol && s.name &&
+    (s.symbol.startsWith(q) || s.name.includes(q) || s.symbol.toLowerCase().includes(ql))
+  ).slice(0, 10);
+}
+
+// ─── US stock search (Finnhub) ───────────────────────────────────────
+async function searchUSStocks(q) {
+  if (!q || q.length < 1) return [];
+  try {
+    const res = await fetch(`https://finnhub.io/api/v1/search?q=${encodeURIComponent(q)}&token=${FINNHUB_KEY}`, { signal: AbortSignal.timeout(5000) });
+    const data = await res.json();
+    return (data.result || []).filter(r => r.type === 'Common Stock' || r.type === 'ETP').slice(0, 10).map(r => ({
+      symbol: r.symbol, name: r.description
+    }));
+  } catch(e) { return []; }
+}
+
+// ─── Calculations ────────────────────────────────────────────────────
+function fmtNum(n, dec=0) {
+  if (n == null || isNaN(n)) return '—';
+  return n.toLocaleString('zh-TW', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+}
+function fmtShares(n, isUs=false) {
+  if (n == null || isNaN(n)) return '—';
+  if (!isUs) return n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
+  // Up to 5 decimal places, trim trailing zeros, correct thousands separator
+  return parseFloat(n.toFixed(5)).toLocaleString('zh-TW', { minimumFractionDigits: 0, maximumFractionDigits: 5 });
+}
+function fmtPct(n) {
+  if (n == null || isNaN(n)) return '—';
+  return (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+}
+function pnlClass(n) {
+  if (!n || n === 0) return 'neutral';
+  return n > 0 ? 'profit' : 'loss';
+}
+
+function calcTW(h) {
+  const price = prices[h.symbol];
+  const value = price != null ? price * h.shares : null;
+  const cost = h.cost * h.shares;
+  const pnl = value != null ? value - cost : null;
+  const pct = pnl != null ? (pnl / cost) * 100 : null;
+  return { price, value, cost, pnl, pct };
+}
+function calcTWDUS(h, rate) {
+  const price = prices[h.symbol]; // USD
+  const valueTWD = price != null ? price * rate * h.shares : null;
+  const costTWD = h.cost * h.shares; // cost already in TWD
+  const pnl = valueTWD != null ? valueTWD - costTWD : null;
+  const pct = pnl != null ? (pnl / costTWD) * 100 : null;
+  return { price, valueTWD, costTWD, pnl, pct };
+}
+function calcUSDUS(h) {
+  const price = prices[h.symbol]; // USD
+  const valueUSD = price != null ? price * h.shares : null;
+  const costUSD = h.cost * h.shares;
+  const pnl = valueUSD != null ? valueUSD - costUSD : null;
+  const pct = pnl != null ? (pnl / costUSD) * 100 : null;
+  return { price, valueUSD, costUSD, pnl, pct };
+}
+
+// ─── Rendering ────────────────────────────────────────────────────────
+function renderAll() {
+  const rate = parseFloat(document.getElementById('rate-input').value) || state.exchangeRate;
+  state.exchangeRate = rate;
+
+  let twTotalVal = 0, twTotalCost = 0;
+  let usTotalValTWD = 0, usTotalCostTWD = 0;
+
+  // Taiwan
+  const twBody = document.getElementById('tbody-tw');
+  twBody.innerHTML = '';
+  if (!state.portfolios.tw.length) {
+    twBody.innerHTML = '<tr><td colspan="9" class="empty-state">尚無持股，點擊新增</td></tr>';
+  } else {
+    state.portfolios.tw.forEach((h, i) => {
+      const { price, value, cost, pnl, pct } = calcTW(h);
+      if (value != null) { twTotalVal += value; twTotalCost += cost; }
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><span class="symbol">${h.symbol}</span></td>
+        <td><span class="name" title="${h.name||''}">${h.name||'—'}</span></td>
+        <td>${fmtShares(h.shares, false)}</td>
+        <td>${fmtNum(h.cost, 2)}</td>
+        <td class="${price ? '' : 'price-loading'}">${price ? fmtNum(price, 2) : '載入中'}</td>
+        <td>${value != null ? fmtNum(value) : '—'}</td>
+        <td class="${pnlClass(pnl)}">${pnl != null ? (pnl>=0?'+':'')+fmtNum(pnl) : '—'}</td>
+        <td class="${pnlClass(pct)}">${fmtPct(pct)}</td>
+        <td><button class="btn-danger" onclick="removeHolding('tw',${i})">✕</button></td>`;
+      twBody.appendChild(tr);
+    });
+  }
+
+  // TWD US
+  const twdUsBody = document.getElementById('tbody-twdUs');
+  twdUsBody.innerHTML = '';
+  if (!state.portfolios.twdUs.length) {
+    twdUsBody.innerHTML = '<tr><td colspan="9" class="empty-state">尚無持股，點擊新增</td></tr>';
+  } else {
+    state.portfolios.twdUs.forEach((h, i) => {
+      const { price, valueTWD, costTWD, pnl, pct } = calcTWDUS(h, rate);
+      if (valueTWD != null) { usTotalValTWD += valueTWD; usTotalCostTWD += costTWD; }
+      else { usTotalCostTWD += costTWD; }
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><span class="symbol">${h.symbol}</span></td>
+        <td><span class="name" title="${h.name||''}">${h.name||'—'}</span></td>
+        <td>${fmtShares(h.shares, true)}</td>
+        <td>${fmtNum(h.cost, 2)}</td>
+        <td class="${price ? '' : 'price-loading'}">${price ? `$${fmtNum(price,2)}<br><small style="color:var(--dim)">≈${fmtNum(price*rate)}</small>` : '載入中'}</td>
+        <td>${valueTWD != null ? fmtNum(valueTWD) : '—'}</td>
+        <td class="${pnlClass(pnl)}">${pnl != null ? (pnl>=0?'+':'')+fmtNum(pnl) : '—'}</td>
+        <td class="${pnlClass(pct)}">${fmtPct(pct)}</td>
+        <td><button class="btn-danger" onclick="removeHolding('twdUs',${i})">✕</button></td>`;
+      twdUsBody.appendChild(tr);
+    });
+  }
+
+  // USD US
+  const usdUsBody = document.getElementById('tbody-usdUs');
+  usdUsBody.innerHTML = '';
+  if (!state.portfolios.usdUs.length) {
+    usdUsBody.innerHTML = '<tr><td colspan="9" class="empty-state">尚無持股，點擊新增</td></tr>';
+  } else {
+    state.portfolios.usdUs.forEach((h, i) => {
+      const { price, valueUSD, costUSD, pnl, pct } = calcUSDUS(h);
+      const valTWD = valueUSD != null ? valueUSD * rate : null;
+      const costTWD = costUSD * rate;
+      if (valTWD != null) { usTotalValTWD += valTWD; usTotalCostTWD += costTWD; }
+      else { usTotalCostTWD += costTWD; }
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><span class="symbol">${h.symbol}</span></td>
+        <td><span class="name" title="${h.name||''}">${h.name||'—'}</span></td>
+        <td>${fmtShares(h.shares, true)}</td>
+        <td>$${fmtNum(h.cost,2)}</td>
+        <td class="${price ? '' : 'price-loading'}">${price ? '$'+fmtNum(price,2) : '載入中'}</td>
+        <td>${valueUSD != null ? '$'+fmtNum(valueUSD,2) : '—'}</td>
+        <td class="${pnlClass(pnl)}">${pnl != null ? (pnl>=0?'+$':'-$')+fmtNum(Math.abs(pnl),2) : '—'}</td>
+        <td class="${pnlClass(pct)}">${fmtPct(pct)}</td>
+        <td><button class="btn-danger" onclick="removeHolding('usdUs',${i})">✕</button></td>`;
+      usdUsBody.appendChild(tr);
+    });
+  }
+
+  // Section summaries
+  const twPnl = twTotalVal - twTotalCost;
+  const usPnl = usTotalValTWD - usTotalCostTWD;
+  const totalVal = twTotalVal + usTotalValTWD;
+  const totalCost = twTotalCost + usTotalCostTWD;
+  const totalPnl = totalVal - totalCost;
+  const totalPct = totalCost ? (totalPnl / totalCost) * 100 : 0;
+
+  function sectSum(pnl) {
+    if (!pnl) return '';
+    return `損益 <span class="${pnlClass(pnl)}">${pnl>=0?'+':''}${fmtNum(pnl)}</span>`;
+  }
+  document.getElementById('sect-sum-tw').innerHTML = sectSum(twPnl);
+  document.getElementById('sect-sum-twdUs').innerHTML = sectSum(usPnl);
+  document.getElementById('sect-sum-usdUs').innerHTML = '';
+
+  // Summary cards
+  document.getElementById('s-tw-val').textContent = twTotalVal ? fmtNum(twTotalVal) : '—';
+  document.getElementById('s-us-val').textContent = usTotalValTWD ? fmtNum(usTotalValTWD) : '—';
+  document.getElementById('s-total-val').textContent = totalVal ? fmtNum(totalVal) : '—';
+  const pnlEl = document.getElementById('s-pnl');
+  pnlEl.textContent = totalPnl ? (totalPnl>=0?'+':'')+fmtNum(totalPnl) : '—';
+  pnlEl.className = 'value ' + pnlClass(totalPnl);
+  document.getElementById('s-pnl-pct').innerHTML = totalPct ? `<span class="${pnlClass(totalPnl)}">${fmtPct(totalPct)}</span>` : '';
+
+  if (lastUpdated) {
+    document.getElementById('last-update').textContent = `更新 ${lastUpdated.toLocaleTimeString('zh-TW')}`;
+  }
+}
+
+function toggleSection(type) {
+  const body = document.getElementById('body-'+type);
+  const tog = document.getElementById('toggle-'+type);
+  body.classList.toggle('open');
+  tog.textContent = body.classList.contains('open') ? '▼' : '▶';
+}
+
+// ─── Modal ──────────────────────────────────────────────────────────
+function buildRowHTML(idx, type) {
+  const isTW = type === 'tw';
+  const costLabel = isTW ? '成本/股 (TWD)' : (type === 'twdUs' ? '成本/股 (TWD)' : '成本/股 (USD)');
+  return `
+<div class="add-row" id="arow-${idx}">
+  <div class="field">
+    <label>${isTW ? '代號（或中文）' : '代號 (Ticker)'}</label>
+    <div class="search-wrap">
+      <input type="text" id="sym-${idx}" placeholder="${isTW ? 'e.g. 2330' : 'e.g. AAPL'}" autocomplete="off"
+        oninput="onSymInput(${idx},'${type}')" onblur="closeDropdown(${idx})">
+      <div class="search-dropdown" id="drop-${idx}" style="display:none"></div>
+    </div>
+  </div>
+  <div class="field">
+    <label>公司名稱</label>
+    <input type="text" id="name-${idx}" placeholder="自動帶入">
+  </div>
+  <div class="field">
+    <label>股數</label>
+    <input type="number" id="shares-${idx}" placeholder="0" min="0" step="${isTW ? '1' : '0.00001'}">
+  </div>
+  <div class="field">
+    <label>${costLabel}</label>
+    <input type="number" id="cost-${idx}" placeholder="0.00" min="0" step="0.01">
+  </div>
+  <button class="btn-danger" style="margin-top:20px" onclick="removeRow(${idx})">✕</button>
+</div>`;
+}
+
+let rowCount = 0;
+function openModal(type) {
+  currentModalType = type;
+  rowCount = 0;
+  const titles = { tw:'新增台股', twdUs:'新增台幣複委託美股', usdUs:'新增外幣複委託美股' };
+  document.getElementById('modal-title').textContent = titles[type] || '新增持股';
+  document.getElementById('add-rows').innerHTML = '';
+  addRowToModal();
+  document.getElementById('modal').style.display = 'flex';
+}
+function closeModal() { document.getElementById('modal').style.display = 'none'; }
+function addRowToModal() {
+  const container = document.getElementById('add-rows');
+  const div = document.createElement('div');
+  div.innerHTML = buildRowHTML(rowCount++, currentModalType);
+  container.appendChild(div.firstElementChild);
+}
+function removeRow(idx) {
+  const el = document.getElementById('arow-'+idx);
+  if (el) el.remove();
+}
+
+// Search logic
+let searchDebounce = {};
+function onSymInput(idx, type) {
+  const q = document.getElementById('sym-'+idx).value.trim();
+  clearTimeout(searchDebounce[idx]);
+  if (!q) { closeDropdown(idx); return; }
+  searchDebounce[idx] = setTimeout(() => runSearch(idx, type, q), 300);
+}
+async function runSearch(idx, type, q) {
+  let results = [];
+  if (type === 'tw') results = await searchTWStocks(q);
+  else results = await searchUSStocks(q);
+
+  const drop = document.getElementById('drop-'+idx);
+  if (!drop) return;
+  if (!results.length) { drop.style.display = 'none'; return; }
+  drop.innerHTML = results.map(r =>
+    `<div class="search-item" onmousedown="pickStock(${idx},'${r.symbol.replace(/'/g,"\\'")}','${(r.name||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">
+       <span class="si-symbol">${r.symbol}</span>
+       <span class="si-name">${r.name||''}</span>
+     </div>`
+  ).join('');
+  drop.style.display = 'block';
+}
+function pickStock(idx, symbol, name) {
+  const symEl = document.getElementById('sym-'+idx);
+  const nameEl = document.getElementById('name-'+idx);
+  if (symEl) symEl.value = symbol;
+  if (nameEl) nameEl.value = name;
+  closeDropdown(idx);
+}
+function closeDropdown(idx) {
+  setTimeout(() => {
+    const drop = document.getElementById('drop-'+idx);
+    if (drop) drop.style.display = 'none';
+  }, 200);
+}
+
+async function submitModal() {
+  const type = currentModalType;
+  const rows = document.querySelectorAll('#add-rows .add-row');
+  const toAdd = [];
+  for (const row of rows) {
+    const idx = row.id.replace('arow-','');
+    const symbol = (document.getElementById('sym-'+idx)?.value||'').trim().toUpperCase();
+    const name = (document.getElementById('name-'+idx)?.value||'').trim();
+    const shares = parseFloat(document.getElementById('shares-'+idx)?.value||'0');
+    const cost = parseFloat(document.getElementById('cost-'+idx)?.value||'0');
+    if (!symbol || !shares || !cost) continue;
+    toAdd.push({ id: Date.now()+Math.random(), symbol, name, shares, cost });
+  }
+  if (!toAdd.length) { showToast('請填寫完整資料'); return; }
+  toAdd.forEach(h => state.portfolios[type].push(h));
+  closeModal();
+  renderAll();
+  await saveState();
+  // Fetch prices for new stocks
+  const newSymbols = toAdd.map(h => h.symbol);
+  if (type === 'tw') await fetchTWPrices(newSymbols);
+  else await fetchUSPrices(newSymbols);
+  renderAll();
+  await saveState();
+  showToast(`新增 ${toAdd.length} 筆持股`);
+}
+
+function removeHolding(type, idx) {
+  state.portfolios[type].splice(idx, 1);
+  renderAll();
+  saveState();
+  showToast('已刪除');
+}
+
+// ─── Toast ────────────────────────────────────────────────────────────
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2500);
+}
+
+// ─── Exchange rate input ───────────────────────────────────────────────
+document.getElementById('rate-input').addEventListener('input', function() {
+  const r = parseFloat(this.value);
+  if (r > 0) { state.exchangeRate = r; renderAll(); saveState(); }
+});
+
+// ─── Init ──────────────────────────────────────────────────────────────
+(async function init() {
+  // Get password from sessionStorage (set by outer loader)
+  _pwd = sessionStorage.getItem('__sk') || null;
+  if (_pwd) sessionStorage.removeItem('__sk');
+
+  await loadState();
+  document.getElementById('rate-input').value = state.exchangeRate;
+  renderAll();
+  await fetchAllPrices();
+  refreshTimer = setInterval(fetchAllPrices, REFRESH_INTERVAL);
+})();
+</script>
+</body>
+</html>
