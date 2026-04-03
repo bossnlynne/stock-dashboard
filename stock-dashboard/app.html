@@ -309,10 +309,10 @@ async function loadTWData() {
   ]);
   if (r1.status === 'fulfilled' && Array.isArray(r1.value)) {
     r1.value.forEach(item => {
-      const sym = item['證券代號'];
+      const sym = item['Code'];
       if (!sym) return;
-      const p = parseFloat((item['收盤價'] || '').replace(/,/g, ''));
-      twDataCache[sym] = { name: item['證券名稱'] || '', price: (p && !isNaN(p)) ? p : null };
+      const p = parseFloat((item['ClosingPrice'] || '').replace(/,/g, ''));
+      twDataCache[sym] = { name: item['Name'] || '', price: (p && !isNaN(p)) ? p : null };
     });
   }
   if (r2.status === 'fulfilled' && Array.isArray(r2.value)) {
@@ -320,7 +320,7 @@ async function loadTWData() {
       const sym = item['SecuritiesCompanyCode'];
       if (!sym) return;
       const p = parseFloat((item['Close'] || '').replace(/,/g, ''));
-      twDataCache[sym] = { name: item['CompanyAbbreviation'] || '', price: (p && !isNaN(p)) ? p : null };
+      twDataCache[sym] = { name: item['CompanyName'] || '', price: (p && !isNaN(p)) ? p : null };
     });
   }
   return twDataCache;
