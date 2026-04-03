@@ -303,16 +303,20 @@ let twDataCache = null;
 async function loadTWData() {
   if (twDataCache) return twDataCache;
   twDataCache = {};
+  const TPEX_PROXY = 'https://api.codetabs.com/v1/proxy/?quest=https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes';
   const [r1, r2] = await Promise.allSettled([
-    fetch('https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL', { signal: AbortSignal.timeout(10000) }).then(r => r.json()),
-    fetch('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes', { signal: AbortSignal.timeout(10000) }).then(r => r.json())
+    // TWSE: Access-Control-Allow-Origin: * confirmed
+    fetch('https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY_ALL?response=json', { signal: AbortSignal.timeout(10000) }).then(r => r.json()),
+    // TPEX: via CORS proxy (TWSE blocks proxies, TPEX does not)
+    fetch(TPEX_PROXY, { signal: AbortSignal.timeout(10000) }).then(r => r.json())
   ]);
-  if (r1.status === 'fulfilled' && Array.isArray(r1.value)) {
-    r1.value.forEach(item => {
-      const sym = item['Code'];
+  if (r1.status === 'fulfilled' && Array.isArray(r1.value?.data)) {
+    // row format: [代號(0), 名稱(1), 成交股數, 成交金額, 開盤, 最高, 最低, 收盤(7), 漲跌, 筆數]
+    r1.value.data.forEach(row => {
+      const sym = row[0];
       if (!sym) return;
-      const p = parseFloat((item['ClosingPrice'] || '').replace(/,/g, ''));
-      twDataCache[sym] = { name: item['Name'] || '', price: (p && !isNaN(p)) ? p : null };
+      const p = parseFloat((row[7] || '').replace(/,/g, ''));
+      twDataCache[sym] = { name: row[1] || '', price: (p && !isNaN(p)) ? p : null };
     });
   }
   if (r2.status === 'fulfilled' && Array.isArray(r2.value)) {
@@ -593,7 +597,7 @@ function buildRowHTML(idx, type) {
     <label>${isTW ? '代號（或中文）' : '代號 (Ticker)'}</label>
     <div class="search-wrap">
       <input type="text" id="sym-${idx}" placeholder="${isTW ? 'e.g. 2330' : 'e.g. AAPL'}" autocomplete="off"
-        oninput="onSymInput(${idx},'${type}')" onblur="closeDropdown(${idx})">
+        oninput="onSymInput(${idx},'${type}')" onblur="onSymBlur(${idx},'${type}')" onkeydown="if(event.key==='Enter'){event.preventDefault();onSymBlur(${idx},'${type}')}">
       <div class="search-dropdown" id="drop-${idx}" style="display:none"></div>
     </div>
   </div>
@@ -658,6 +662,21 @@ async function runSearch(idx, type, q) {
      </div>`
   ).join('');
   drop.style.display = 'block';
+}
+async function onSymBlur(idx, type) {
+  closeDropdown(idx);
+  const sym = (document.getElementById('sym-'+idx)?.value || '').trim().toUpperCase();
+  const nameEl = document.getElementById('name-'+idx);
+  if (!sym || !nameEl || nameEl.value) return;
+  if (type === 'tw') {
+    const cache = await loadTWData();
+    const d = cache[sym];
+    if (d?.name) nameEl.value = d.name;
+  } else {
+    const results = await searchUSStocks(sym);
+    const exact = results.find(r => r.symbol === sym);
+    if (exact?.name) nameEl.value = exact.name;
+  }
 }
 function pickStock(idx, symbol, name) {
   const symEl = document.getElementById('sym-'+idx);
