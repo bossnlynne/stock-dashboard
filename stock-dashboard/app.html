@@ -76,6 +76,9 @@ tr:hover td{background:rgba(255,255,255,.02)}
 .loss{color:var(--loss)}
 .neutral{color:var(--dim)}
 .price-loading{color:var(--dim);font-style:italic}
+.editable{cursor:pointer;border-bottom:1px dashed var(--border);padding-bottom:1px}
+.editable:hover{border-bottom-color:#555}
+.edit-input{background:var(--surface2);border:1px solid #555;color:var(--text);border-radius:4px;padding:2px 6px;font-size:13px;width:90px;outline:none;text-align:right}
 .section-add{padding:12px 18px;background:var(--surface)}
 
 /* Modal */
@@ -629,8 +632,8 @@ function renderAll() {
       tr.innerHTML = `
         <td><span class="symbol">${h.symbol}</span></td>
         <td><span class="name" title="${h.name||''}">${h.name||'—'}</span></td>
-        <td>${fmtShares(h.shares, false)}</td>
-        <td>${fmtNum(h.cost, 2)}</td>
+        <td><span class="editable" onclick="editCell(this,'tw',${i},'shares',false)">${fmtShares(h.shares, false)}</span></td>
+        <td><span class="editable" onclick="editCell(this,'tw',${i},'cost',false)">${fmtNum(h.cost, 2)}</span></td>
         <td class="${price ? '' : 'price-loading'}">${price ? fmtNum(price, 2) : '載入中'}</td>
         <td>${value != null ? fmtNum(value) : '—'}</td>
         <td class="${pnlClass(pnl)}">${pnl != null ? (pnl>=0?'+':'')+fmtNum(pnl) : '—'}</td>
@@ -655,8 +658,8 @@ function renderAll() {
       tr.innerHTML = `
         <td><span class="symbol">${h.symbol}</span></td>
         <td><span class="name" title="${h.name||''}">${h.name||'—'}</span></td>
-        <td>${fmtShares(h.shares, true)}</td>
-        <td>$${fmtNum(h.cost, 2)}</td>
+        <td><span class="editable" onclick="editCell(this,'twdUs',${i},'shares',true)">${fmtShares(h.shares, true)}</span></td>
+        <td><span class="editable" onclick="editCell(this,'twdUs',${i},'cost',true)">$${fmtNum(h.cost, 2)}</span></td>
         <td class="${price ? '' : 'price-loading'}">${price ? '$'+fmtNum(price,2) : '載入中'}</td>
         <td>${valueUSD != null ? '$'+fmtNum(valueUSD,2) : '—'}</td>
         <td>${valueTWD != null ? fmtNum(valueTWD) : '—'}</td>
@@ -683,8 +686,8 @@ function renderAll() {
       tr.innerHTML = `
         <td><span class="symbol">${h.symbol}</span></td>
         <td><span class="name" title="${h.name||''}">${h.name||'—'}</span></td>
-        <td>${fmtShares(h.shares, true)}</td>
-        <td>$${fmtNum(h.cost,2)}</td>
+        <td><span class="editable" onclick="editCell(this,'usdUs',${i},'shares',true)">${fmtShares(h.shares, true)}</span></td>
+        <td><span class="editable" onclick="editCell(this,'usdUs',${i},'cost',true)">$${fmtNum(h.cost,2)}</span></td>
         <td class="${price ? '' : 'price-loading'}">${price ? '$'+fmtNum(price,2) : '載入中'}</td>
         <td>${valueUSD != null ? '$'+fmtNum(valueUSD,2) : '—'}</td>
         <td class="${pnlClass(pnl)}">${pnl != null ? (pnl>=0?'+$':'-$')+fmtNum(Math.abs(pnl),2) : '—'}</td>
@@ -867,6 +870,41 @@ function removeHolding(type, idx) {
   renderAll();
   saveState();
   showToast('已刪除');
+}
+
+// ─── Inline edit ──────────────────────────────────────────────────────
+function editCell(span, type, idx, field, isUs) {
+  if (span.querySelector('input')) return;
+  const h = state.portfolios[type][idx];
+  const raw = h[field];
+  const step = field === 'shares' ? (isUs ? '0.00001' : '1') : '0.01';
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.className = 'edit-input';
+  input.value = raw;
+  input.step = step;
+  input.min = '0';
+  span.textContent = '';
+  span.appendChild(input);
+  input.focus();
+  input.select();
+
+  function commit() {
+    const v = parseFloat(input.value);
+    if (v > 0 && v !== raw) {
+      h[field] = v;
+      renderAll();
+      saveState();
+      showToast('已更新');
+    } else {
+      renderAll();
+    }
+  }
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { input.value = raw; input.blur(); }
+  });
 }
 
 // ─── Toast ────────────────────────────────────────────────────────────
