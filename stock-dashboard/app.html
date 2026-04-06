@@ -134,6 +134,23 @@ tr:hover td{background:rgba(255,255,255,.02)}
 .calc-summary-msg{font-size:14px;margin-top:10px}
 .calc-not-found{color:var(--warn);font-size:11px;margin-top:2px}
 
+/* ─── Notes ─────────────────────────────────── */
+.notes-container{max-width:920px;margin:0 auto;padding:24px}
+.notes-header{display:flex;align-items:center;gap:16px;margin-bottom:28px;flex-wrap:wrap}
+.notes-header h2{font-size:24px;font-weight:700;flex:1;letter-spacing:-0.02em}
+.notes-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
+.note-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:10px;transition:border-color .15s}
+.note-card:hover{border-color:#333}
+.note-card .note-date{font-size:11px;color:var(--dim);letter-spacing:.3px}
+.note-card .note-body{font-size:14px;line-height:1.65;white-space:pre-wrap;word-break:break-word;flex:1;min-height:40px}
+.note-card .note-actions{display:flex;gap:6px;justify-content:flex-end;opacity:0;transition:opacity .15s}
+.note-card:hover .note-actions{opacity:1}
+.note-empty{text-align:center;color:var(--dim);padding:60px 20px;font-size:14px}
+.note-editor{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:20px}
+.note-editor textarea{width:100%;background:transparent;border:none;color:var(--text);font-size:14px;line-height:1.65;resize:vertical;min-height:80px;outline:none;font-family:inherit}
+.note-editor textarea::placeholder{color:var(--dim)}
+.note-editor-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+
 /* Responsive */
 @media(max-width:600px){
   #header{padding:10px 14px}
@@ -143,6 +160,9 @@ tr:hover td{background:rgba(255,255,255,.02)}
   .add-row{grid-template-columns:1fr 1fr;gap:6px}
   .calc-container{padding:14px}
   .calc-row{grid-template-columns:1fr 1fr 1fr;gap:8px}
+  .notes-container{padding:14px}
+  .notes-grid{grid-template-columns:1fr}
+  .note-card .note-actions{opacity:1}
 }
 </style>
 </head>
@@ -163,6 +183,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
 <div id="tab-bar">
   <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">持股總覽</button>
   <button class="tab-btn" data-tab="calculator" onclick="switchTab('calculator')">損益試算</button>
+  <button class="tab-btn" data-tab="notes" onclick="switchTab('notes')">投資備忘錄</button>
 </div>
 
 <!-- ═══ Tab 1: Dashboard ═══ -->
@@ -299,6 +320,28 @@ tr:hover td{background:rgba(255,255,255,.02)}
 </div>
 </div><!-- /tab-calculator -->
 
+<!-- ═══ Tab 3: Notes ═══ -->
+<div id="tab-notes" class="tab-content" style="display:none">
+<div class="notes-container">
+
+  <div class="notes-header">
+    <h2>投資備忘錄</h2>
+    <button class="btn-primary" onclick="showNoteEditor()">新增備忘</button>
+  </div>
+
+  <div class="note-editor" id="note-editor" style="display:none">
+    <textarea id="note-input" placeholder="寫下你的投資筆記..." rows="3"></textarea>
+    <div class="note-editor-footer">
+      <button class="btn-ghost" onclick="cancelNoteEditor()">取消</button>
+      <button class="btn-primary" onclick="saveNote()">儲存</button>
+    </div>
+  </div>
+
+  <div id="notes-list"></div>
+
+</div>
+</div><!-- /tab-notes -->
+
 <!-- Add Modal (Dashboard) -->
 <div class="modal-overlay" id="modal" style="display:none">
   <div class="modal">
@@ -398,6 +441,7 @@ async function loadState() {
       state.portfolios.tw = state.portfolios.tw || [];
       state.portfolios.twdUs = state.portfolios.twdUs || [];
       state.portfolios.usdUs = state.portfolios.usdUs || [];
+      state.notes = state.notes || [];
     }
   } catch(e) { console.error('load err', e); }
 }
@@ -1183,6 +1227,89 @@ function importFromPortfolio() {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// ─── Notes Logic ──────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════
+let editingNoteId = null;
+
+function showNoteEditor(noteId) {
+  const editor = document.getElementById('note-editor');
+  const input = document.getElementById('note-input');
+  editor.style.display = 'block';
+  if (noteId != null) {
+    const note = (state.notes || []).find(n => n.id === noteId);
+    if (note) { input.value = note.text; editingNoteId = noteId; }
+  } else {
+    input.value = '';
+    editingNoteId = null;
+  }
+  input.focus();
+}
+
+function cancelNoteEditor() {
+  document.getElementById('note-editor').style.display = 'none';
+  document.getElementById('note-input').value = '';
+  editingNoteId = null;
+}
+
+function saveNote() {
+  const text = document.getElementById('note-input').value.trim();
+  if (!text) { showToast('請輸入內容'); return; }
+  if (!state.notes) state.notes = [];
+
+  if (editingNoteId != null) {
+    const note = state.notes.find(n => n.id === editingNoteId);
+    if (note) { note.text = text; note.updatedAt = Date.now(); }
+    showToast('已更新備忘');
+  } else {
+    state.notes.unshift({ id: Date.now() + Math.random(), text, createdAt: Date.now(), updatedAt: null });
+    showToast('已新增備忘');
+  }
+
+  cancelNoteEditor();
+  renderNotes();
+  saveState();
+}
+
+function deleteNote(noteId) {
+  if (!state.notes) return;
+  state.notes = state.notes.filter(n => n.id !== noteId);
+  renderNotes();
+  saveState();
+  showToast('已刪除');
+}
+
+function fmtDate(ts) {
+  const d = new Date(ts);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const h = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${y}/${m}/${day} ${h}:${min}`;
+}
+
+function renderNotes() {
+  const container = document.getElementById('notes-list');
+  const notes = state.notes || [];
+  if (!notes.length) {
+    container.innerHTML = '<div class="note-empty">尚無備忘錄，點擊「新增備忘」開始記錄</div>';
+    return;
+  }
+  container.innerHTML = '<div class="notes-grid">' + notes.map(n => {
+    const dateStr = n.updatedAt ? `${fmtDate(n.createdAt)}（已編輯 ${fmtDate(n.updatedAt)}）` : fmtDate(n.createdAt);
+    const escapedText = n.text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return `<div class="note-card">
+      <div class="note-date">${dateStr}</div>
+      <div class="note-body">${escapedText}</div>
+      <div class="note-actions">
+        <button class="btn-ghost" style="padding:4px 10px;font-size:12px" onclick="showNoteEditor(${n.id})">編輯</button>
+        <button class="btn-danger" style="padding:4px 10px;font-size:12px" onclick="deleteNote(${n.id})">刪除</button>
+      </div>
+    </div>`;
+  }).join('') + '</div>';
+}
+
 // ─── Init ──────────────────────────────────────────────────────────────
 (async function init() {
   _pwd = sessionStorage.getItem('__sk') || null;
@@ -1191,6 +1318,7 @@ function importFromPortfolio() {
   await loadState();
   document.getElementById('rate-input').value = state.exchangeRate;
   renderAll();
+  renderNotes();
   await fetchAllPrices();
   refreshTimer = setInterval(fetchAllPrices, REFRESH_INTERVAL);
 })();
