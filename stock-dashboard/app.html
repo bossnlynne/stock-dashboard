@@ -400,6 +400,17 @@ async function getCryptoKey(password) {
   );
   return _cryptoKey;
 }
+function uint8ToBase64(bytes) {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+function base64ToUint8(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
 async function encryptData(obj, password) {
   const key = await getCryptoKey(password);
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -407,11 +418,11 @@ async function encryptData(obj, password) {
   const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, key, enc.encode(JSON.stringify(obj)));
   const out = new Uint8Array(iv.length + ct.byteLength);
   out.set(iv); out.set(new Uint8Array(ct), iv.length);
-  return btoa(String.fromCharCode(...out));
+  return uint8ToBase64(out);
 }
 async function decryptData(b64, password) {
   const key = await getCryptoKey(password);
-  const raw = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  const raw = base64ToUint8(b64);
   const iv = raw.slice(0, 12);
   const ct = raw.slice(12);
   const pt = await crypto.subtle.decrypt({ name:'AES-GCM', iv }, key, ct);
@@ -802,12 +813,21 @@ async function runSearch(idx, type, q) {
   const drop = document.getElementById('drop-'+idx);
   if (!drop) return;
   if (!results.length) { drop.style.display = 'none'; return; }
-  drop.innerHTML = results.map(r =>
-    `<div class="search-item" onmousedown="pickStock(${idx},'${r.symbol.replace(/'/g,"\\'")}','${(r.name||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">
-       <span class="si-symbol">${r.symbol}</span>
-       <span class="si-name">${r.name||''}</span>
-     </div>`
-  ).join('');
+  drop.innerHTML = '';
+  results.forEach(r => {
+    const div = document.createElement('div');
+    div.className = 'search-item';
+    div.onmousedown = () => pickStock(idx, r.symbol, r.name || '');
+    const symSpan = document.createElement('span');
+    symSpan.className = 'si-symbol';
+    symSpan.textContent = r.symbol;
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'si-name';
+    nameSpan.textContent = r.name || '';
+    div.appendChild(symSpan);
+    div.appendChild(nameSpan);
+    drop.appendChild(div);
+  });
   drop.style.display = 'block';
 }
 async function onSymBlur(idx, type) {
@@ -866,6 +886,9 @@ async function submitModal() {
 }
 
 function removeHolding(type, idx) {
+  const h = state.portfolios[type][idx];
+  if (!h) return;
+  if (!confirm(`確定刪除 ${h.symbol}${h.name ? ' ('+h.name+')' : ''} 嗎？`)) return;
   state.portfolios[type].splice(idx, 1);
   renderAll();
   saveState();
@@ -919,6 +942,17 @@ function showToast(msg) {
 document.getElementById('rate-input').addEventListener('input', function() {
   const r = parseFloat(this.value);
   if (r > 0) { state.exchangeRate = r; renderAll(); saveState(); }
+});
+
+// ─── Pause refresh when tab hidden ────────────────────────────────────
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  } else {
+    fetchAllPrices();
+    refreshTimer = setInterval(fetchAllPrices, REFRESH_INTERVAL);
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1013,12 +1047,21 @@ async function runCalcSearch(section, id, q, dropId) {
   const drop = document.getElementById(dropId || ('cdrop-'+section+'-'+id));
   if (!drop) return;
   if (!results.length) { drop.style.display = 'none'; return; }
-  drop.innerHTML = results.map(r =>
-    `<div class="search-item" onmousedown="pickCalcStock('${section}',${id},'${r.symbol.replace(/'/g,"\\'")}','${(r.name||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">
-       <span class="si-symbol">${r.symbol}</span>
-       <span class="si-name">${(r.name||'').replace(/</g,'&lt;')}</span>
-     </div>`
-  ).join('');
+  drop.innerHTML = '';
+  results.forEach(r => {
+    const div = document.createElement('div');
+    div.className = 'search-item';
+    div.onmousedown = () => pickCalcStock(section, id, r.symbol, r.name || '');
+    const symSpan = document.createElement('span');
+    symSpan.className = 'si-symbol';
+    symSpan.textContent = r.symbol;
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'si-name';
+    nameSpan.textContent = r.name || '';
+    div.appendChild(symSpan);
+    div.appendChild(nameSpan);
+    drop.appendChild(div);
+  });
   drop.style.display = 'block';
 }
 
@@ -1300,7 +1343,7 @@ function saveNote() {
     if (note) { note.text = text; note.updatedAt = Date.now(); }
     showToast('已更新備忘');
   } else {
-    state.notes.unshift({ id: Date.now() + Math.random(), text, createdAt: Date.now(), updatedAt: null });
+    state.notes.unshift({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), text, createdAt: Date.now(), updatedAt: null });
     showToast('已新增備忘');
   }
 
@@ -1311,6 +1354,7 @@ function saveNote() {
 
 function deleteNote(noteId) {
   if (!state.notes) return;
+  if (!confirm('確定刪除這則備忘錄嗎？')) return;
   state.notes = state.notes.filter(n => n.id !== noteId);
   renderNotes();
   saveState();
@@ -1341,8 +1385,8 @@ function renderNotes() {
       <div class="note-date">${dateStr}</div>
       <div class="note-body">${escapedText}</div>
       <div class="note-actions">
-        <button class="btn-ghost" style="padding:4px 10px;font-size:12px" onclick="showNoteEditor(${n.id})">編輯</button>
-        <button class="btn-danger" style="padding:4px 10px;font-size:12px" onclick="deleteNote(${n.id})">刪除</button>
+        <button class="btn-ghost" style="padding:4px 10px;font-size:12px" onclick="showNoteEditor('${n.id}')">編輯</button>
+        <button class="btn-danger" style="padding:4px 10px;font-size:12px" onclick="deleteNote('${n.id}')">刪除</button>
       </div>
     </div>`;
   }).join('') + '</div>';
